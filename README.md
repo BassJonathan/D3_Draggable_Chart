@@ -29,7 +29,7 @@ git clone https://github.com/BassJonathan/D3_Draggable_Chart.git
 ```
 2. Navigate to the project directory:
 ```bash
-cd interactive-line-chart
+cd D3_Draggable_Chart
 ```
 3. Open the index.html file in a web browser.
 You can also use a local development server if you have one installed (e.g., using Python's HTTP server or Node.js).
