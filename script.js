@@ -13,25 +13,32 @@ const svg = d3
   .append("g")
   .attr("transform", `translate(${margin.left},${margin.top})`);
 
-// Sample data: Time vs Fan Speed
 let data = [
-  { time: 6, speed: 25 },
-  { time: 12, speed: 50 },
-  { time: 18, speed: 25 },
-  { time: 19, speed: 0}
+  { time: new Date(2024, 0, 1, 6, 0), speed: 25 },
+  { time: new Date(2024, 0, 1, 12, 0), speed: 50 },
+  { time: new Date(2024, 0, 1, 18, 0), speed: 25 },
+  { time: new Date(2024, 0, 1, 19, 0), speed: 5 },
 ];
 
 // X axis
-const x = d3.scaleLinear().domain([-0, 24]).range([0, width]);
+const x = d3.scaleTime()
+  .domain([new Date(2024, 0, 1, 0, 0), new Date(2024, 0, 1, 23, 59)]) // Covering the full day from 00:00 to 23:59
+  .range([0, width]);
+
+const xAxis = d3.axisBottom(x)
+  .tickFormat(d3.timeFormat("%H:%M"))
+  .ticks(d3.timeHour.every(1));
 
 svg
   .append("g")
   .attr("transform", `translate(0,${height})`)
-  .call(d3.axisBottom(x)) // Linear
+  .call(xAxis) // Linear
 
 // Y & secondary y axis
 const y = d3.scaleLinear().domain([0, 100]).range([height, 0]);
+
 svg.append("g").call(d3.axisLeft(y)); // primary Y
+
 svg
   .append("g")
   .attr("transform", `translate(${width},0)`)
@@ -63,7 +70,9 @@ svg
 const line = d3
   .line()
   .x((d) => x(d.time))
-  .y((d) => y(d.speed));
+  .y((d) => y(d.speed))
+  .curve(d3.curveStepAfter);
+line.curveType = d3.curveStepAfter;
 
 const path = svg
   .append("path")
@@ -73,7 +82,7 @@ const path = svg
   .attr("stroke-width", 2)
   .attr("d", line);
 
-const xAxisStep = 0.5;  // Define steps width on the x-axis
+const xAxisStep = 15;  // Define steps width on the x-axis
 const yAxisStep = 5; // Define steps width on the y-axis
 
 function snapToGrid(x, y) {
@@ -94,40 +103,29 @@ function interpolateY(x1, y1, x2, y2, x) {
 }
 
 function updateLineAndPoints() {
-  // Extended data adjustments
-  let extendedFirstPointTime = 0;
-  let extendedLastPointTime = 24;
+  let sortedData = data.sort((a, b) => a.time - b.time);
 
-  let extendedFirstPointSpeed = interpolateY(
-    data[data.length - 1].time - 24,
-    data[data.length - 1].speed,
-    data[0].time,
-    data[0].speed,
-    extendedFirstPointTime
-  );
-  let extendedLastPointSpeed = interpolateY(
-    data[0].time + 24,
-    data[0].speed,
-    data[data.length - 1].time,
-    data[data.length - 1].speed,
-    extendedLastPointTime
-  );
+  let extendedFirstPointTime = new Date(2024, 0, 1, 0, 0);
+  let extendedLastPointTime = new Date(2024, 0, 1, 23, 59);
 
-  // Create extended data using the calculated adjustments
+  let extendedFirstPointSpeed;
+  let extendedLastPointSpeed;
+  if (line.curveType == d3.curveStepAfter) {
+    extendedFirstPointSpeed = sortedData[sortedData.length - 1].speed;
+    extendedLastPointSpeed = sortedData[0].speed;
+  } else {
+    extendedFirstPointSpeed = interpolateY(sortedData[sortedData.length - 1].time.getTime() - 86400000, sortedData[sortedData.length - 1].speed, sortedData[0].time.getTime(), sortedData[0].speed, extendedFirstPointTime.getTime(), "true");
+    extendedLastPointSpeed = interpolateY(sortedData[0].time.getTime() + 86400000, sortedData[0].speed, sortedData[sortedData.length - 1].time.getTime(), sortedData[sortedData.length - 1].speed, extendedLastPointTime.getTime(), "false");
+  }
+  
   const extendedData = [
-    {
-      ...data[data.length - 1],
-      time: extendedFirstPointTime,
-      speed: extendedFirstPointSpeed,
-    },
-    ...data,
-    { ...data[0], time: extendedLastPointTime, speed: extendedLastPointSpeed },
+    { time: extendedFirstPointTime, speed: extendedFirstPointSpeed },
+    ...sortedData,
+    { time: extendedLastPointTime, speed: extendedLastPointSpeed }
   ];
 
-  // Update the path for the line to include extended data
   path.datum(extendedData).attr("d", line);
 
-  // Update the circles for actual data points
   const circles = svg.selectAll("circle").data(data);
 
   circles
@@ -148,13 +146,12 @@ function updateLineAndPoints() {
     })
     .call(
       d3.drag().on("drag", function (event, draggedPoint) {
-        const [newX, newY] = snapToGrid(Math.min(24, Math.max(0, x.invert(event.x))), Math.min(100, Math.max(0, y.invert(event.y))));
+        const newX = new Date(Math.round(x.invert(event.x).getTime() / (xAxisStep * 60000)) * (xAxisStep * 60000));
+        const newY = Math.min(100, Math.max(0, Math.round(y.invert(event.y) / yAxisStep) * yAxisStep));
         const index = data.indexOf(draggedPoint);
-        const prevPointTime = index > 0 ? data[index - 1].time : 0;
-        const nextPointTime =
-          index < data.length - 1 ? data[index + 1].time : 24;
-
-        if (newX >= prevPointTime && newX <= nextPointTime) {
+        const prevPointTime = index > 0 ? data[index - 1].time.getTime() : new Date(2024, 0, 1, 0, 0).getTime();
+        const nextPointTime = index < data.length - 1 ? data[index + 1].time.getTime() : new Date(2024, 0, 1, 23, 59).getTime();
+        if (newX.getTime() >= prevPointTime && newX.getTime() <= nextPointTime) {
           draggedPoint.time = newX;
           draggedPoint.speed = newY;
           d3.select(this)
@@ -164,7 +161,6 @@ function updateLineAndPoints() {
         }
       })
     );
-
   circles.exit().remove();
 }
 
@@ -184,11 +180,11 @@ d3.select("svg").on("keydown", (event) => {
 // Add the ability to create new points by double-clicking
 svg.on("dblclick", (event) => {
   const coords = d3.pointer(event, svg.node());
-  const time = Math.min(24, Math.max(0, x.invert(coords[0])));
-  const speed = Math.min(100, Math.max(0, y.invert(coords[1])));
+  const time = new Date(Math.round(x.invert(coords[0]).getTime() / (xAxisStep * 60000)) * (xAxisStep * 60000));
+  const speed = Math.round(y.invert(coords[1]) / yAxisStep) * yAxisStep;
 
   // Check if the time slot is already taken
-  if (data.some((point) => Math.abs(point.time - time) < 0.1)) {
+  if (data.some((point) => Math.abs(point.time.getTime() - time.getTime()) < 60000)) { // 1 minute tolerance
     console.log(
       "A point already exists at this time. Please choose another time."
     );
